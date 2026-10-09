@@ -2226,8 +2226,7 @@ class SortingAnalyzer:
         probe_as_numpy_array = probe_as_numpy_array[np.argsort(probe_as_numpy_array["device_channel_indices"])]
         ndim = probegroup.ndim
         locations = np.zeros((probe_as_numpy_array.size, ndim), dtype="float64")
-        # here we only loop through xy because only 2d locations are supported
-        for i, dim in enumerate(["x", "y"][:ndim]):
+        for i, dim in enumerate(["x", "y", "z"][:ndim]):
             locations[:, i] = probe_as_numpy_array[dim]
         return locations
 

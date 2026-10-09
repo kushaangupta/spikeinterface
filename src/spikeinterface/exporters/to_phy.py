@@ -32,6 +32,7 @@ def export_to_phy(
     dtype: Optional[npt.DTypeLike] = None,
     verbose: bool = True,
     use_relative_path: bool = False,
+    channel_positions_2d: np.ndarray | None = None,
     **job_kwargs,
 ):
     """
@@ -71,6 +72,11 @@ def export_to_phy(
     use_relative_path : bool, default: False
         If True and `copy_binary=True` saves the binary file `dat_path` in the `params.py` relative to `output_folder` (ie `dat_path=r"recording.dat"`). If `copy_binary=False`, then uses a path relative to the `output_folder`
         If False, uses an absolute path in the `params.py` (ie `dat_path=r"path/to/the/recording.dat"`)
+    channel_positions_2d : np.ndarray or None, default: None
+        Optional (num_channels, 2) positions for Phy's display. For a 3-D probe,
+        the default uses x and y; provide an explicit projection if those
+        positions overlap. This does not change physical channel locations
+        used by the sorting analyzer.
     {}
 
     """
@@ -83,6 +89,23 @@ def export_to_phy(
         sorting_analyzer.get_num_segments() == 1
     ), f"Export to phy only works with one segment, your extractor has {sorting_analyzer.get_num_segments()} segments"
     num_chans = sorting_analyzer.get_num_channels()
+    physical_positions = sorting_analyzer.get_channel_locations()
+    if channel_positions_2d is None:
+        channel_positions = physical_positions[:, :2].astype("float32")
+        if physical_positions.shape[1] == 3 and np.unique(channel_positions, axis=0).shape[0] != num_chans:
+            raise ValueError(
+                "The 3-D probe has overlapping x/y display positions. Pass unique "
+                "(num_channels, 2) channel_positions_2d to export_to_phy."
+            )
+    else:
+        channel_positions = np.asarray(channel_positions_2d)
+        if channel_positions.shape != (num_chans, 2):
+            raise ValueError(f"channel_positions_2d must have shape ({num_chans}, 2)")
+        channel_positions = channel_positions.astype("float32")
+        if not np.all(np.isfinite(channel_positions)):
+            raise ValueError("channel_positions_2d must contain finite values")
+        if np.unique(channel_positions, axis=0).shape[0] != num_chans:
+            raise ValueError("channel_positions_2d must contain distinct display positions")
     fs = sorting_analyzer.sampling_frequency
 
     job_kwargs = fix_job_kwargs(job_kwargs)
@@ -208,7 +231,6 @@ def export_to_phy(
 
     channel_maps = np.arange(num_chans, dtype="int32")
     channel_map_si = sorting_analyzer.channel_ids
-    channel_positions = sorting_analyzer.get_channel_locations().astype("float32")
     channel_groups = sorting_analyzer.get_recording_property("group")
     if channel_groups is None:
         channel_groups = np.zeros(num_chans, dtype="int32")

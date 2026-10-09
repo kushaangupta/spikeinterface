@@ -3,8 +3,9 @@ import shutil
 import numpy as np
 import pytest
 
-from spikeinterface.core import generate_ground_truth_recording, create_sorting_analyzer
+from spikeinterface.core import generate_ground_truth_recording, create_sorting_analyzer, NumpyRecording, NumpySorting
 from spikeinterface.exporters import export_to_phy
+from probeinterface import Probe
 
 from spikeinterface.exporters.tests.common import (
     make_sorting_analyzer,
@@ -32,6 +33,43 @@ def test_export_to_phy_dense(sorting_analyzer_dense_for_export, create_cache_fol
         chunk_size=10000,
         progress_bar=True,
     )
+
+
+def test_export_to_phy_uses_separate_2d_positions_for_3d_probe(tmp_path):
+    traces = np.zeros((1000, 3), dtype="float32")
+    spike_samples = np.array([200, 400, 600])
+    traces[spike_samples, 0] = -10
+    recording = NumpyRecording(traces, sampling_frequency=20_000)
+    probe = Probe(ndim=3, si_units="um")
+    positions_3d = np.array([[0, 0, 0], [0, 0, 50], [100, 0, 0]])
+    probe.set_contacts(
+        positions=positions_3d,
+        plane_axes=np.broadcast_to(np.eye(3)[:2], (3, 2, 3)),
+    )
+    probe.set_device_channel_indices(np.arange(3))
+    recording.set_probe(probe)
+    sorting = NumpySorting.from_unit_dict({1: spike_samples}, sampling_frequency=20_000)
+    analyzer = create_sorting_analyzer(sorting, recording, format="memory", sparse=False)
+    np.testing.assert_array_equal(analyzer.get_channel_locations(), positions_3d)
+    analyzer.compute("random_spikes", method="all")
+    analyzer.compute("waveforms", n_jobs=1)
+    analyzer.compute("templates")
+
+    with pytest.raises(ValueError, match="overlapping x/y display positions"):
+        export_to_phy(
+            analyzer, tmp_path / "invalid", copy_binary=False,
+            compute_pc_features=False, compute_amplitudes=False,
+        )
+    assert not (tmp_path / "invalid").exists()
+
+    display_positions = np.array([[0, 0], [50, 0], [100, 0]])
+    export_to_phy(
+        analyzer, tmp_path / "phy", copy_binary=False,
+        compute_pc_features=False, compute_amplitudes=False,
+        channel_positions_2d=display_positions,
+    )
+    np.testing.assert_array_equal(np.load(tmp_path / "phy" / "channel_positions.npy"), display_positions)
+    np.testing.assert_array_equal(analyzer.get_channel_locations(), positions_3d)
 
 
 def test_export_to_phy_sparse(sorting_analyzer_sparse_for_export, create_cache_folder):
